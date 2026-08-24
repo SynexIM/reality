@@ -137,7 +137,20 @@ func NewRatelimitedConn(conn net.Conn, limit *LimitFallback) net.Conn {
 }
 
 var (
-	size  = 8192
+	// size bounds one record read from the borrowed target. It must not be
+	// smaller than a record the target is allowed to send: RFC 8446 §5.2 caps
+	// TLSCiphertext.length at 2^14 + 256, and every record carries a 5-byte
+	// header, so a legitimate record reaches maxCiphertextTLS13 + recordHeaderLen.
+	//
+	// This used to be a flat 8192, which is below that bound. Any target whose
+	// Certificate record was larger got abandoned mid-handshake — and the failure
+	// lands *after* the client has authenticated, so the server looks healthy
+	// while clients cannot connect. www.microsoft.com with OCSP stapling sends
+	// 8273 bytes and reproduces it exactly.
+	//
+	// Expressed with the package's own constants rather than a rounded literal:
+	// the ceiling is the protocol's, not a number someone picked.
+	size  = recordHeaderLen + maxCiphertextTLS13
 	empty = make([]byte, size)
 	types = [7]string{
 		"Server Hello",
